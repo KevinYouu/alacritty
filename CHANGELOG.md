@@ -1,5 +1,9 @@
 # Changelog
 
+#### 2023-08-03 19:41:52 星期四 
+
+build: 合并上游;更新依赖 
+
 All notable changes to Alacritty are documented in this file.
 The sections should follow the order `Packaging`, `Added`, `Changed`, `Fixed` and `Removed`.
 
