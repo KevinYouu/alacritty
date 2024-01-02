@@ -17,19 +17,14 @@ use std::time::{Duration, Instant};
 use log::debug;
 use winit::dpi::PhysicalPosition;
 use winit::event::{
-    ElementState, KeyEvent, Modifiers, MouseButton, MouseScrollDelta, Touch as TouchEvent,
-    TouchPhase,
+    ElementState, Modifiers, MouseButton, MouseScrollDelta, Touch as TouchEvent, TouchPhase,
 };
 use winit::event_loop::EventLoopWindowTarget;
+use winit::keyboard::ModifiersState;
 #[cfg(target_os = "macos")]
-use winit::keyboard::ModifiersKeyState;
-use winit::keyboard::{Key, ModifiersState};
-#[cfg(target_os = "macos")]
-use winit::platform::macos::{EventLoopWindowTargetExtMacOS, OptionAsAlt};
-use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+use winit::platform::macos::EventLoopWindowTargetExtMacOS;
 use winit::window::CursorIcon;
 
-use alacritty_terminal::ansi::{ClearMode, Handler};
 use alacritty_terminal::event::EventListener;
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Point, Side};
@@ -37,22 +32,23 @@ use alacritty_terminal::selection::SelectionType;
 use alacritty_terminal::term::search::Match;
 use alacritty_terminal::term::{ClipboardType, Term, TermMode};
 use alacritty_terminal::vi_mode::ViMotion;
+use alacritty_terminal::vte::ansi::{ClearMode, Handler};
 
 use crate::clipboard::Clipboard;
-use crate::config::{
-    Action, BindingKey, BindingMode, MouseAction, SearchAction, UiConfig, ViAction,
-};
+use crate::config::{Action, BindingMode, MouseAction, SearchAction, UiConfig, ViAction};
 use crate::display::hint::HintMatch;
 use crate::display::window::Window;
 use crate::display::{Display, SizeInfo};
 use crate::event::{
-    ClickState, Event, EventType, Mouse, TouchPurpose, TouchZoom, TYPING_SEARCH_DELAY,
+    ClickState, Event, EventType, InlineSearchState, Mouse, TouchPurpose, TouchZoom,
 };
 use crate::message_bar::{self, Message};
 use crate::scheduler::{Scheduler, TimerId, Topic};
 
-/// Font size change interval.
-pub const FONT_SIZE_STEP: f32 = 0.5;
+pub mod keyboard;
+
+/// Font size change interval in px.
+pub const FONT_SIZE_STEP: f32 = 1.;
 
 /// Interval for mouse scrolling during selection outside of the boundaries.
 const SELECTION_SCROLLING_INTERVAL: Duration = Duration::from_millis(15);
@@ -124,6 +120,10 @@ pub trait ActionContext<T: EventListener> {
     fn search_active(&self) -> bool;
     fn on_typing_start(&mut self) {}
     fn toggle_vi_mode(&mut self) {}
+    fn inline_search_state(&mut self) -> &mut InlineSearchState;
+    fn start_inline_search(&mut self, _direction: Direction, _stop_short: bool) {}
+    fn inline_search_next(&mut self) {}
+    fn inline_search_previous(&mut self) {}
     fn hint_input(&mut self, _character: char) {}
     fn trigger_hint(&mut self, _hint: &HintMatch) {}
     fn expand_selection(&mut self) {}
@@ -259,6 +259,20 @@ impl<T: EventListener> Execute<T> for Action {
 
                 ctx.scroll(Scroll::Delta(scroll_lines));
             },
+            Action::Vi(ViAction::InlineSearchForward) => {
+                ctx.start_inline_search(Direction::Right, false)
+            },
+            Action::Vi(ViAction::InlineSearchBackward) => {
+                ctx.start_inline_search(Direction::Left, false)
+            },
+            Action::Vi(ViAction::InlineSearchForwardShort) => {
+                ctx.start_inline_search(Direction::Right, true)
+            },
+            Action::Vi(ViAction::InlineSearchBackwardShort) => {
+                ctx.start_inline_search(Direction::Left, true)
+            },
+            Action::Vi(ViAction::InlineSearchNext) => ctx.inline_search_next(),
+            Action::Vi(ViAction::InlineSearchPrevious) => ctx.inline_search_previous(),
             action @ Action::Search(_) if !ctx.search_active() => {
                 debug!("Ignoring {action:?}: Search mode inactive");
             },
@@ -307,39 +321,35 @@ impl<T: EventListener> Execute<T> for Action {
             Action::Minimize => ctx.window().set_minimized(true),
             Action::Quit => ctx.terminal_mut().exit(),
             Action::IncreaseFontSize => ctx.change_font_size(FONT_SIZE_STEP),
-            Action::DecreaseFontSize => ctx.change_font_size(FONT_SIZE_STEP * -1.),
+            Action::DecreaseFontSize => ctx.change_font_size(-FONT_SIZE_STEP),
             Action::ResetFontSize => ctx.reset_font_size(),
-            Action::ScrollPageUp => {
+            Action::ScrollPageUp
+            | Action::ScrollPageDown
+            | Action::ScrollHalfPageUp
+            | Action::ScrollHalfPageDown => {
                 // Move vi mode cursor.
                 let term = ctx.terminal_mut();
-                let scroll_lines = term.screen_lines() as i32;
-                term.vi_mode_cursor = term.vi_mode_cursor.scroll(term, scroll_lines);
+                let (scroll, amount) = match self {
+                    Action::ScrollPageUp => (Scroll::PageUp, term.screen_lines() as i32),
+                    Action::ScrollPageDown => (Scroll::PageDown, -(term.screen_lines() as i32)),
+                    Action::ScrollHalfPageUp => {
+                        let amount = term.screen_lines() as i32 / 2;
+                        (Scroll::Delta(amount), amount)
+                    },
+                    Action::ScrollHalfPageDown => {
+                        let amount = -(term.screen_lines() as i32 / 2);
+                        (Scroll::Delta(amount), amount)
+                    },
+                    _ => unreachable!(),
+                };
 
-                ctx.scroll(Scroll::PageUp);
-            },
-            Action::ScrollPageDown => {
-                // Move vi mode cursor.
-                let term = ctx.terminal_mut();
-                let scroll_lines = -(term.screen_lines() as i32);
-                term.vi_mode_cursor = term.vi_mode_cursor.scroll(term, scroll_lines);
+                let old_vi_cursor = term.vi_mode_cursor;
+                term.vi_mode_cursor = term.vi_mode_cursor.scroll(term, amount);
+                if old_vi_cursor != term.vi_mode_cursor {
+                    ctx.mark_dirty();
+                }
 
-                ctx.scroll(Scroll::PageDown);
-            },
-            Action::ScrollHalfPageUp => {
-                // Move vi mode cursor.
-                let term = ctx.terminal_mut();
-                let scroll_lines = term.screen_lines() as i32 / 2;
-                term.vi_mode_cursor = term.vi_mode_cursor.scroll(term, scroll_lines);
-
-                ctx.scroll(Scroll::Delta(scroll_lines));
-            },
-            Action::ScrollHalfPageDown => {
-                // Move vi mode cursor.
-                let term = ctx.terminal_mut();
-                let scroll_lines = -(term.screen_lines() as i32 / 2);
-                term.vi_mode_cursor = term.vi_mode_cursor.scroll(term, scroll_lines);
-
-                ctx.scroll(Scroll::Delta(scroll_lines));
+                ctx.scroll(scroll);
             },
             Action::ScrollLineUp => ctx.scroll(Scroll::Delta(1)),
             Action::ScrollLineDown => ctx.scroll(Scroll::Delta(-1)),
@@ -682,7 +692,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
     }
 
     pub fn mouse_wheel_input(&mut self, delta: MouseScrollDelta, phase: TouchPhase) {
-        let multiplier = self.ctx.config().terminal_config.scrolling.multiplier;
+        let multiplier = self.ctx.config().scrolling.multiplier;
         match delta {
             MouseScrollDelta::LineDelta(columns, lines) => {
                 let new_scroll_px_x = columns * self.ctx.size_info().cell_width();
@@ -984,131 +994,27 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
         let mode = BindingMode::new(self.ctx.terminal().mode(), self.ctx.search_active());
         let mouse_mode = self.ctx.mouse_mode();
         let mods = self.ctx.modifiers().state();
+        let mouse_bindings = self.ctx.config().mouse_bindings().to_owned();
 
-        for i in 0..self.ctx.config().mouse_bindings().len() {
-            let mut binding = self.ctx.config().mouse_bindings()[i].clone();
+        // If mouse mode is active, also look for bindings without shift.
+        let mut check_fallback = mouse_mode && mods.contains(ModifiersState::SHIFT);
 
-            // Require shift for all modifiers when mouse mode is active.
-            if mouse_mode {
-                binding.mods |= ModifiersState::SHIFT;
-            }
-
-            if binding.is_triggered_by(mode, mods, &button) {
+        for binding in &mouse_bindings {
+            // Don't trigger normal bindings in mouse mode unless Shift is pressed.
+            if binding.is_triggered_by(mode, mods, &button) && (check_fallback || !mouse_mode) {
                 binding.action.execute(&mut self.ctx);
-            }
-        }
-    }
-
-    /// Process key input.
-    pub fn key_input(&mut self, key: KeyEvent) {
-        // IME input will be applied on commit and shouldn't trigger key bindings.
-        if key.state == ElementState::Released || self.ctx.display().ime.preedit().is_some() {
-            return;
-        }
-
-        let text = key.text_with_all_modifiers().unwrap_or_default();
-
-        // All key bindings are disabled while a hint is being selected.
-        if self.ctx.display().hint_state.active() {
-            for character in text.chars() {
-                self.ctx.hint_input(character);
-            }
-            return;
-        }
-
-        // Reset search delay when the user is still typing.
-        if self.ctx.search_active() {
-            let timer_id = TimerId::new(Topic::DelayedSearch, self.ctx.window().id());
-            let scheduler = self.ctx.scheduler_mut();
-            if let Some(timer) = scheduler.unschedule(timer_id) {
-                scheduler.schedule(timer.event, TYPING_SEARCH_DELAY, false, timer.id);
+                check_fallback = false;
             }
         }
 
-        // Key bindings suppress the character input.
-        if self.process_key_bindings(&key) {
-            return;
-        }
-
-        if self.ctx.search_active() {
-            for character in text.chars() {
-                self.ctx.search_input(character);
-            }
-
-            return;
-        }
-
-        // Vi mode on its own doesn't have any input, the search input was done before.
-        if self.ctx.terminal().mode().contains(TermMode::VI) || text.is_empty() {
-            return;
-        }
-
-        self.ctx.on_terminal_input_start();
-
-        let mut bytes = Vec::with_capacity(text.len() + 1);
-        if self.alt_send_esc() && text.len() == 1 {
-            bytes.push(b'\x1b');
-        }
-        bytes.extend_from_slice(text.as_bytes());
-
-        self.ctx.write_to_pty(bytes);
-    }
-
-    /// Whether we should send `ESC` due to `Alt` being pressed.
-    #[cfg(not(target_os = "macos"))]
-    fn alt_send_esc(&mut self) -> bool {
-        self.ctx.modifiers().state().alt_key()
-    }
-
-    #[cfg(target_os = "macos")]
-    fn alt_send_esc(&mut self) -> bool {
-        let option_as_alt = self.ctx.config().window.option_as_alt();
-        self.ctx.modifiers().state().alt_key()
-            && (option_as_alt == OptionAsAlt::Both
-                || (option_as_alt == OptionAsAlt::OnlyLeft
-                    && self.ctx.modifiers().lalt_state() == ModifiersKeyState::Pressed)
-                || (option_as_alt == OptionAsAlt::OnlyRight
-                    && self.ctx.modifiers().ralt_state() == ModifiersKeyState::Pressed))
-    }
-
-    /// Attempt to find a binding and execute its action.
-    ///
-    /// The provided mode, mods, and key must match what is allowed by a binding
-    /// for its action to be executed.
-    fn process_key_bindings(&mut self, key: &KeyEvent) -> bool {
-        let mode = BindingMode::new(self.ctx.terminal().mode(), self.ctx.search_active());
-        let mods = self.ctx.modifiers().state();
-
-        // Don't suppress char if no bindings were triggered.
-        let mut suppress_chars = None;
-
-        for i in 0..self.ctx.config().key_bindings().len() {
-            let binding = &self.ctx.config().key_bindings()[i];
-
-            // We don't want the key without modifier, because it means something else most of
-            // the time. However what we want is to manually lowercase the character to account
-            // for both small and capital latters on regular characters at the same time.
-            let logical_key = if let Key::Character(ch) = key.logical_key.as_ref() {
-                Key::Character(ch.to_lowercase().into())
-            } else {
-                key.logical_key.clone()
-            };
-
-            let key = match (&binding.trigger, logical_key) {
-                (BindingKey::Scancode(_), _) => BindingKey::Scancode(key.physical_key),
-                (_, code) => BindingKey::Keycode { key: code, location: key.location },
-            };
-
-            if binding.is_triggered_by(mode, mods, &key) {
-                // Pass through the key if any of the bindings has the `ReceiveChar` action.
-                *suppress_chars.get_or_insert(true) &= binding.action != Action::ReceiveChar;
-
-                // Binding was triggered; run the action.
-                binding.action.clone().execute(&mut self.ctx);
+        if check_fallback {
+            let fallback_mods = mods & !ModifiersState::SHIFT;
+            for binding in &mouse_bindings {
+                if binding.is_triggered_by(mode, fallback_mods, &button) {
+                    binding.action.execute(&mut self.ctx);
+                }
             }
         }
-
-        suppress_chars.unwrap_or(false)
     }
 
     /// Check mouse icon state in relation to the message bar.
@@ -1218,6 +1124,7 @@ mod tests {
         pub message_buffer: &'a mut MessageBuffer,
         pub modifiers: Modifiers,
         config: &'a UiConfig,
+        inline_search_state: &'a mut InlineSearchState,
     }
 
     impl<'a, T: EventListener> super::ActionContext<T> for ActionContext<'a, T> {
@@ -1232,6 +1139,10 @@ mod tests {
 
         fn search_direction(&self) -> Direction {
             Direction::Right
+        }
+
+        fn inline_search_state(&mut self) -> &mut InlineSearchState {
+            self.inline_search_state
         }
 
         fn search_active(&self) -> bool {
@@ -1337,7 +1248,7 @@ mod tests {
                     false,
                 );
 
-                let mut terminal = Term::new(&cfg.terminal_config, &size, MockEventProxy);
+                let mut terminal = Term::new(cfg.term_options(), &size, MockEventProxy);
 
                 let mut mouse = Mouse {
                     click_state: $initial_state,
@@ -1346,6 +1257,7 @@ mod tests {
                     ..Mouse::default()
                 };
 
+                let mut inline_search_state = InlineSearchState::default();
                 let mut message_buffer = MessageBuffer::default();
 
                 let context = ActionContext {
@@ -1355,6 +1267,7 @@ mod tests {
                     clipboard: &mut clipboard,
                     modifiers: Default::default(),
                     message_buffer: &mut message_buffer,
+                    inline_search_state: &mut inline_search_state,
                     config: &cfg,
                 };
 

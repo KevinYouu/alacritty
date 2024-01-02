@@ -11,9 +11,7 @@ use winit::platform::wayland::WindowBuilderExtWayland;
 use {
     std::io::Cursor,
     winit::platform::x11::{WindowBuilderExtX11, EventLoopWindowTargetExtX11},
-    winit::window::raw_window_handle::{HasRawDisplayHandle, RawDisplayHandle},
     glutin::platform::x11::X11VisualInfo,
-    x11_dl::xlib::{Display as XDisplay, PropModeReplace, XErrorEvent, Xlib},
     winit::window::Icon,
     png::Decoder,
 };
@@ -28,15 +26,15 @@ use {
     winit::platform::macos::{OptionAsAlt, WindowBuilderExtMacOS, WindowExtMacOS},
 };
 
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::monitor::MonitorHandle;
 #[cfg(windows)]
 use winit::platform::windows::IconExtWindows;
-use winit::window::raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use winit::window::{
-    CursorIcon, Fullscreen, ImePurpose, UserAttentionType, Window as WinitWindow, WindowBuilder,
-    WindowId,
+    CursorIcon, Fullscreen, ImePurpose, Theme, UserAttentionType, Window as WinitWindow,
+    WindowBuilder, WindowId,
 };
 
 use alacritty_terminal::index::Point;
@@ -114,6 +112,7 @@ pub struct Window {
     /// Current window title.
     title: String,
 
+    is_x11: bool,
     current_mouse_cursor: CursorIcon,
     mouse_visible: bool,
 }
@@ -154,9 +153,14 @@ impl Window {
             window_builder = window_builder.with_activation_token(token);
 
             // Remove the token from the env.
-            unsafe {
-                startup_notify::reset_activation_token_env();
-            }
+            startup_notify::reset_activation_token_env();
+        }
+
+        // On X11, embed the window inside another if the parent ID has been set.
+        #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
+        if let Some(parent_window_id) = event_loop.is_x11().then_some(config.window.embed).flatten()
+        {
+            window_builder = window_builder.with_embed_parent_window(parent_window_id);
         }
 
         let window = window_builder
@@ -164,6 +168,7 @@ impl Window {
             .with_theme(config.window.decorations_theme_variant)
             .with_visible(false)
             .with_transparent(true)
+            .with_blur(config.window.blur)
             .with_maximized(config.window.maximized())
             .with_fullscreen(config.window.fullscreen())
             .build(event_loop)?;
@@ -182,24 +187,19 @@ impl Window {
         #[cfg(target_os = "macos")]
         use_srgb_color_space(&window);
 
-        // On X11, embed the window inside another if the parent ID has been set.
-        #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
-        if let Some(parent_window_id) = event_loop.is_x11().then_some(config.window.embed).flatten()
-        {
-            x_embed_window(&window, parent_window_id);
-        }
-
         let scale_factor = window.scale_factor();
         log::info!("Window scale factor: {}", scale_factor);
+        let is_x11 = matches!(window.raw_window_handle(), RawWindowHandle::Xlib(_));
 
         Ok(Self {
+            requested_redraw: false,
+            title: identity.title,
             current_mouse_cursor,
             mouse_visible: true,
-            requested_redraw: false,
-            window,
-            title: identity.title,
             has_frame: true,
             scale_factor,
+            window,
+            is_x11,
         })
     }
 
@@ -345,6 +345,10 @@ impl Window {
         self.window.set_transparent(transparent);
     }
 
+    pub fn set_blur(&self, blur: bool) {
+        self.window.set_blur(blur);
+    }
+
     pub fn set_maximized(&self, maximized: bool) {
         self.window.set_maximized(maximized);
     }
@@ -372,6 +376,10 @@ impl Window {
     /// Should be called right before presenting to the window with e.g. `eglSwapBuffers`.
     pub fn pre_present_notify(&self) {
         self.window.pre_present_notify();
+    }
+
+    pub fn set_theme(&self, theme: Option<Theme>) {
+        self.window.set_theme(theme);
     }
 
     #[cfg(target_os = "macos")]
@@ -402,16 +410,25 @@ impl Window {
     }
 
     pub fn set_ime_allowed(&self, allowed: bool) {
-        self.window.set_ime_allowed(allowed);
+        // Skip runtime IME manipulation on X11 since it breaks some IMEs.
+        if !self.is_x11 {
+            self.window.set_ime_allowed(allowed);
+        }
     }
 
     /// Adjust the IME editor position according to the new location of the cursor.
     pub fn update_ime_position(&self, point: Point<usize>, size: &SizeInfo) {
+        // NOTE: X11 doesn't support cursor area, so we need to offset manually to not obscure
+        // the text.
+        let offset = if self.is_x11 { 1 } else { 0 };
         let nspot_x = f64::from(size.padding_x() + point.column.0 as f32 * size.cell_width());
-        let nspot_y = f64::from(size.padding_y() + (point.line + 1) as f32 * size.cell_height());
+        let nspot_y =
+            f64::from(size.padding_y() + (point.line + offset) as f32 * size.cell_height());
 
-        // Exclude the rest of the line since we edit from left to right.
-        let width = size.width as f64 - nspot_x;
+        // NOTE: some compositors don't like excluding too much and try to render popup at the
+        // bottom right corner of the provided area, so exclude just the full-width char to not
+        // obscure the cursor and not render popup at the end of the window.
+        let width = size.cell_width() as f64 * 2.;
         let height = size.cell_height as f64;
 
         self.window.set_ime_cursor_area(
@@ -466,44 +483,6 @@ impl Window {
     }
 }
 
-#[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
-fn x_embed_window(window: &WinitWindow, parent_id: std::os::raw::c_ulong) {
-    let xlib_display = window.raw_display_handle();
-    let xlib_window = window.raw_window_handle();
-    let (xlib_display, xlib_window) = match (xlib_display, xlib_window) {
-        (RawDisplayHandle::Xlib(display), RawWindowHandle::Xlib(window)) => {
-            (display.display, window.window)
-        },
-        _ => return,
-    };
-
-    let xlib = Xlib::open().expect("get xlib");
-
-    unsafe {
-        let atom = (xlib.XInternAtom)(xlib_display as *mut _, "_XEMBED".as_ptr() as *const _, 0);
-        (xlib.XChangeProperty)(
-            xlib_display as _,
-            xlib_window,
-            atom,
-            atom,
-            32,
-            PropModeReplace,
-            [0, 1].as_ptr(),
-            2,
-        );
-
-        // Register new error handler.
-        let old_handler = (xlib.XSetErrorHandler)(Some(xembed_error_handler));
-
-        // Check for the existence of the target before attempting reparenting.
-        (xlib.XReparentWindow)(xlib_display as _, xlib_window as _, parent_id, 0, 0);
-
-        // Drain errors and restore original error handler.
-        (xlib.XSync)(xlib_display as _, 0);
-        (xlib.XSetErrorHandler)(old_handler);
-    }
-}
-
 #[cfg(target_os = "macos")]
 fn use_srgb_color_space(window: &WinitWindow) {
     let raw_window = match window.raw_window_handle() {
@@ -514,10 +493,4 @@ fn use_srgb_color_space(window: &WinitWindow) {
     unsafe {
         let _: () = msg_send![raw_window, setColorSpace: NSColorSpace::sRGBColorSpace(nil)];
     }
-}
-
-#[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
-unsafe extern "C" fn xembed_error_handler(_: *mut XDisplay, _: *mut XErrorEvent) -> i32 {
-    log::error!("Could not embed into specified window.");
-    std::process::exit(1);
 }

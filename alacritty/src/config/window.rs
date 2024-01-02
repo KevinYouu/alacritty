@@ -1,5 +1,4 @@
 use std::fmt::{self, Formatter};
-use std::os::raw::c_ulong;
 
 use log::{error, warn};
 use serde::de::{self, MapAccess, Visitor};
@@ -10,10 +9,9 @@ use winit::window::{Fullscreen, Theme};
 use winit::platform::macos::OptionAsAlt as WinitOptionAsAlt;
 
 use alacritty_config_derive::{ConfigDeserialize, SerdeReplace};
-use alacritty_terminal::config::{Percentage, LOG_TARGET_CONFIG};
-use alacritty_terminal::index::Column;
 
-use crate::config::ui_config::Delta;
+use crate::config::ui_config::{Delta, Percentage};
+use crate::config::LOG_TARGET_CONFIG;
 
 /// Default Alacritty name, used for window title and class.
 pub const DEFAULT_NAME: &str = "Alacritty";
@@ -31,7 +29,7 @@ pub struct WindowConfig {
 
     /// XEmbed parent.
     #[config(skip)]
-    pub embed: Option<c_ulong>,
+    pub embed: Option<u32>,
 
     /// System decorations theme variant.
     pub decorations_theme_variant: Option<Theme>,
@@ -48,6 +46,9 @@ pub struct WindowConfig {
 
     /// Background opacity from 0.0 to 1.0.
     pub opacity: Percentage,
+
+    /// Request blur behind the window.
+    pub blur: bool,
 
     /// Controls which `Option` key should be treated as `Alt`.
     #[cfg(target_os = "macos")]
@@ -67,17 +68,18 @@ impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             dynamic_title: true,
+            blur: Default::default(),
+            embed: Default::default(),
+            padding: Default::default(),
+            opacity: Default::default(),
             position: Default::default(),
+            identity: Default::default(),
+            dimensions: Default::default(),
             decorations: Default::default(),
             startup_mode: Default::default(),
-            embed: Default::default(),
-            decorations_theme_variant: Default::default(),
             dynamic_padding: Default::default(),
-            identity: Identity::default(),
-            opacity: Default::default(),
-            padding: Default::default(),
-            dimensions: Default::default(),
             resize_increments: Default::default(),
+            decorations_theme_variant: Default::default(),
             #[cfg(target_os = "macos")]
             option_as_alt: Default::default(),
         }
@@ -87,7 +89,7 @@ impl Default for WindowConfig {
 impl WindowConfig {
     #[inline]
     pub fn dimensions(&self) -> Option<Dimensions> {
-        let (lines, columns) = (self.dimensions.lines, self.dimensions.columns.0);
+        let (lines, columns) = (self.dimensions.lines, self.dimensions.columns);
         let (lines_is_non_zero, columns_is_non_zero) = (lines != 0, columns != 0);
 
         if lines_is_non_zero && columns_is_non_zero {
@@ -191,7 +193,7 @@ pub enum Decorations {
 #[derive(ConfigDeserialize, Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Dimensions {
     /// Window width in character columns.
-    pub columns: Column,
+    pub columns: usize,
 
     /// Window Height in character lines.
     pub lines: usize,

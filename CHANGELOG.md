@@ -5,11 +5,29 @@ The sections should follow the order `Packaging`, `Added`, `Changed`, `Fixed` an
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## 0.13.0-dev
+## 0.14.0-dev
+
+### Fixed
+
+- `alacritty migrate` failing with nonexistent imports
+- `Alt` bindings requiring composed key rather than pre-composed one on macOS
+- `Alt + Control` bindings not working on Windows
+- `chars = "\u000A"` action in bindings inserting `\n`
+- Alternate keys not sent for `Shift + <number>` when using kitty protocol
+- Alternative keys being swapped in kitty protocol implementation
+- Powerline glyphs being cut for narrow fonts
+- Xmodmap not working on X11
+- Occasional slow startup on some X11 window managers
+- Blurry window when using `window.dimensions` on some Wayland compositors
+- IME input lagging behind on X11
+- xdotool modifiers input not working correctly on X11
+- Parsing numbers fails for mouse bindings
+
+## 0.13.0
 
 ### Packaging
 
-- Minimum Rust version has been bumped to 1.65.0
+- Minimum Rust version has been bumped to 1.70.0
 - Manpages are now generated using `scdoc` (see `INSTALL.md`)
 
 ### Added
@@ -23,6 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Bindings to create and navigate tabs on macOS
 - Support startup notify protocol to raise initial window on Wayland/X11
 - Debug option `prefer_egl` to prioritize EGL over other display APIs
+- Inline vi-mode search using `f`/`F`/`t`/`T`
+- `window.blur` config option to request blur for transparent windows
+- `--option` argument for `alacritty msg create-window`
+- Support for `DECRQM`/`DECRPM` escape sequences
+- Support for kitty's keyboard protocol
 
 ### Changed
 
@@ -41,6 +64,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Apply `colors.transparent_background_colors` for selections, hints, and search matches
 - Underline full hint during keyboard selection
 - Synchronized updates now use `CSI 2026` instead of legacy `DCS` variant
+- In mouse mode with `Shift` pressed, mouse bindings without `Shift` are only triggered
+    if no exact binding (i.e. one with `Shift`) is found.
+- Use built-in font for powerline symbols from `U+E0B0` to `U+E0B3`
+- Default `bell.animation` is now `Linear`
+- `IncreaseFontSize/DecreaseFontSize` step is now 1px
+- `font.size` precision was raised to 6 floating point digits
+- Default font size to `11.25` matching 15px
+- `Xft.dpi` is now reloaded when xsettingd change its value on X11
 
 ### Fixed
 
@@ -52,6 +83,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Scrolling on touchscreens
 - Double clicking on CSD titlebar not always maximizing a window on Wayland
 - Excessive memory usage when using regexes with a large number of possible states
+- `window.decorations_theme_variant` not live reloading
+- Copy/Paste being truncated to 64KiB on Wayland
+- X11 clipboard lagging behind sometimes
+- High wakeup count on Wayland due to clipboard polling
+- Blocking paste freezing alacritty on Wayland
+- `Command` modifier persisting after `Cmd + Tab` on macOS
+- Crash on exit when using NVIDIA binary drivers on Wayland
+- `window.startup_mode` applied to window again when creating new tab
+- Crash when leaving search after resize
+- Cursor being hidden after reaching cursor blinking timeout
+- Message bar content getting stuck after closing with multiple messages on Wayland
+- Vi cursor position not redrawn on PageUp/PageDown without scrollback
+- Cursor not updating when blinking and viewport is scrolled
+- Failure to start with recent version of mesa's i915 driver
+- Error when using `chars` inside the mouse bindings
 
 ### Removed
 
@@ -59,6 +105,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Config option `colors.search.bar`, use `colors.footer_bar` instead
 - Config option `mouse.url`, use the `hints` config section
 - Config options `mouse.double_click` and `mouse.triple_click`
+
+## 0.12.3
+
+### Fixed
+
+- Crash on macOS Sonoma due to change in macOS resize handling
+- Crash when Wayland compositor advertises `wl_compositor@v5` interface
 
 ## 0.12.2
 

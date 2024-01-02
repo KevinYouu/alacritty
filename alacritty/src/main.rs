@@ -12,13 +12,11 @@
 #[cfg(not(any(feature = "x11", feature = "wayland", target_os = "macos", windows)))]
 compile_error!(r#"at least one of the "x11"/"wayland" features must be enabled"#);
 
-#[cfg(target_os = "macos")]
-use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
-use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::{env, fs};
 
 use log::info;
 #[cfg(windows)]
@@ -124,7 +122,7 @@ impl Drop for TemporaryFiles {
 ///
 /// Creates a window, the terminal state, PTY, I/O event loop, input processor,
 /// config change monitor, and runs the main display loop.
-fn alacritty(options: Options) -> Result<(), Box<dyn Error>> {
+fn alacritty(mut options: Options) -> Result<(), Box<dyn Error>> {
     // Setup winit event loop.
     let window_event_loop = WinitEventLoopBuilder::<Event>::with_user_event().build()?;
 
@@ -141,14 +139,19 @@ fn alacritty(options: Options) -> Result<(), Box<dyn Error>> {
     info!("Running on Wayland");
 
     // Load configuration file.
-    let config = config::load(&options);
+    let config = config::load(&mut options);
     log_config_path(&config);
 
     // Update the log level from config.
     log::set_max_level(config.debug.log_level);
 
-    // Set environment variables.
-    tty::setup_env(&config.terminal_config);
+    // Set tty environment variables.
+    tty::setup_env();
+
+    // Set env vars from config.
+    for (key, value) in config.env.iter() {
+        env::set_var(key, value);
+    }
 
     // Switch to home directory.
     #[cfg(target_os = "macos")]

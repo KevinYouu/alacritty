@@ -55,15 +55,11 @@ For everyone else, the detailed instructions to install Alacritty can be found
 
 ## Configuration
 
-**Alacritty versions before 0.13.0 are using YAML configuration files
-and all their settings were documented in the `alacritty.yml`. The example
-`alacritty.yml` file for each release can be found on [GitHub releases page](https://github.com/alacritty/alacritty/releases).**
-
 You can find the documentation for Alacritty's configuration in `man 5
-alacritty`, or by looking at [the scdoc file] if you do not have the manpages
+alacritty`, or by looking at [the website] if you do not have the manpages
 installed.
 
-[the scdoc file]: ./extra/man/alacritty.5.scd
+[the website]: https://alacritty.org/config-alacritty.html
 
 Alacritty doesn't create the config file for you, but it looks for one in the
 following locations:
