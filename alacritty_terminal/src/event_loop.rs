@@ -5,7 +5,6 @@ use std::collections::VecDeque;
 use std::fmt::{self, Display, Formatter};
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
-use std::marker::Send;
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
@@ -67,10 +66,11 @@ where
         pty: T,
         hold: bool,
         ref_test: bool,
-    ) -> EventLoop<T, U> {
+    ) -> io::Result<EventLoop<T, U>> {
         let (tx, rx) = mpsc::channel();
-        EventLoop {
-            poll: polling::Poller::new().expect("create Poll").into(),
+        let poll = polling::Poller::new()?.into();
+        Ok(EventLoop {
+            poll,
             pty,
             tx,
             rx: PeekableReceiver::new(rx),
@@ -78,7 +78,7 @@ where
             event_proxy,
             hold,
             ref_test,
-        }
+        })
     }
 
     pub fn channel(&self) -> EventLoopSender {
@@ -213,8 +213,9 @@ where
             let mut interest = PollingEvent::readable(0);
 
             // Register TTY through EventedRW interface.
-            unsafe {
-                self.pty.register(&self.poll, interest, poll_opts).unwrap();
+            if let Err(err) = unsafe { self.pty.register(&self.poll, interest, poll_opts) } {
+                error!("Event loop registration error: {}", err);
+                return (self, state);
             }
 
             let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
@@ -235,7 +236,10 @@ where
                 if let Err(err) = self.poll.wait(&mut events, timeout) {
                     match err.kind() {
                         ErrorKind::Interrupted => continue,
-                        _ => panic!("EventLoop polling error: {err:?}"),
+                        _ => {
+                            error!("Event loop polling error: {}", err);
+                            break 'event_loop;
+                        },
                     }
                 }
 
@@ -254,7 +258,11 @@ where
                 for event in events.iter() {
                     match event.key {
                         tty::PTY_CHILD_EVENT_TOKEN => {
-                            if let Some(tty::ChildEvent::Exited) = self.pty.next_child_event() {
+                            if let Some(tty::ChildEvent::Exited(code)) = self.pty.next_child_event()
+                            {
+                                if let Some(code) = code {
+                                    self.event_proxy.send_event(Event::ChildExit(code));
+                                }
                                 if self.hold {
                                     // With hold enabled, make sure the PTY is drained.
                                     let _ = self.pty_read(&mut state, &mut buf, pipe.as_mut());
@@ -262,7 +270,6 @@ where
                                     // Without hold, shutdown the terminal.
                                     self.terminal.lock().exit();
                                 }
-
                                 self.event_proxy.send_event(Event::Wakeup);
                                 break 'event_loop;
                             }

@@ -1,11 +1,12 @@
 use std::cmp::max;
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use alacritty_config::SerdeReplace;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueHint};
-use log::{self, error, LevelFilter};
+use log::{error, LevelFilter};
 use serde::{Deserialize, Serialize};
 use toml::Value;
 
@@ -195,6 +196,7 @@ impl From<TerminalOptions> for PtyOptions {
             working_directory: options.working_directory.take(),
             shell: options.command().map(Into::into),
             hold: options.hold,
+            env: HashMap::new(),
         }
     }
 }

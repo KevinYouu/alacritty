@@ -4,7 +4,6 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Result};
 use std::mem::MaybeUninit;
-use std::os::fd::OwnedFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -12,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::{env, ptr};
 
-use libc::{self, c_int, TIOCSCTTY};
+use libc::{c_int, TIOCSCTTY};
 use log::error;
 use polling::{Event, PollMode, Poller};
 use rustix_openpty::openpty;
@@ -36,17 +35,6 @@ macro_rules! die {
         error!($($arg)*);
         std::process::exit(1);
     }}
-}
-
-/// Get raw fds for master/slave ends of a new PTY.
-fn make_pty(size: Winsize) -> Result<(OwnedFd, OwnedFd)> {
-    let mut window_size = size;
-    window_size.ws_xpixel = 0;
-    window_size.ws_ypixel = 0;
-
-    let ends = openpty(None, Some(&window_size))?;
-
-    Ok((ends.controller, ends.user))
 }
 
 /// Really only needed on BSD, but should be fine elsewhere.
@@ -194,7 +182,8 @@ fn default_shell_command(shell: &str, user: &str) -> Command {
 
 /// Create a new TTY and return a handle to interact with it.
 pub fn new(config: &Options, window_size: WindowSize, window_id: u64) -> Result<Pty> {
-    let (master, slave) = make_pty(window_size.to_winsize())?;
+    let pty = openpty(None, Some(&window_size.to_winsize()))?;
+    let (master, slave) = (pty.controller, pty.user);
     let master_fd = master.as_raw_fd();
     let slave_fd = slave.as_raw_fd();
 
@@ -228,9 +217,11 @@ pub fn new(config: &Options, window_size: WindowSize, window_id: u64) -> Result<
     builder.env("ALACRITTY_WINDOW_ID", &window_id);
     builder.env("USER", user.user);
     builder.env("HOME", user.home);
-
     // Set Window ID for clients relying on X11 hacks.
     builder.env("WINDOWID", window_id);
+    for (key, value) in &config.env {
+        builder.env(key, value);
+    }
 
     unsafe {
         builder.pre_exec(move || {
@@ -280,9 +271,7 @@ pub fn new(config: &Options, window_size: WindowSize, window_id: u64) -> Result<
                 set_nonblocking(master_fd);
             }
 
-            let mut pty = Pty { child, file: File::from(master), signals };
-            pty.on_resize(window_size);
-            Ok(pty)
+            Ok(Pty { child, file: File::from(master), signals })
         },
         Err(err) => Err(Error::new(
             err.kind(),
@@ -383,7 +372,7 @@ impl EventedPty for Pty {
                 None
             },
             Ok(None) => None,
-            Ok(_) => Some(ChildEvent::Exited),
+            Ok(exit_status) => Some(ChildEvent::Exited(exit_status.and_then(|s| s.code()))),
         }
     }
 }

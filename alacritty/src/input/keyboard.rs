@@ -126,7 +126,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                     self.ctx.modifiers().state().alt_key()
                 }
             },
-            _ => text.len() == 1 && alt_send_esc,
+            _ => alt_send_esc && text.chars().count() == 1,
         }
     }
 
@@ -165,34 +165,36 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
         // Don't suppress char if no bindings were triggered.
         let mut suppress_chars = None;
 
+        // We don't want the key without modifier, because it means something else most of
+        // the time. However what we want is to manually lowercase the character to account
+        // for both small and capital letters on regular characters at the same time.
+        let logical_key = if let Key::Character(ch) = key.logical_key.as_ref() {
+            // Match `Alt` bindings without `Alt` being applied, otherwise they use the
+            // composed chars, which are not intuitive to bind.
+            //
+            // On Windows, the `Ctrl + Alt` mangles `logical_key` to unidentified values, thus
+            // preventing them from being used in bindings
+            //
+            // For more see https://github.com/rust-windowing/winit/issues/2945.
+            if (cfg!(target_os = "macos") || (cfg!(windows) && mods.control_key()))
+                && mods.alt_key()
+            {
+                key.key_without_modifiers()
+            } else {
+                Key::Character(ch.to_lowercase().into())
+            }
+        } else {
+            key.logical_key.clone()
+        };
+
         for i in 0..self.ctx.config().key_bindings().len() {
             let binding = &self.ctx.config().key_bindings()[i];
 
-            // We don't want the key without modifier, because it means something else most of
-            // the time. However what we want is to manually lowercase the character to account
-            // for both small and capital letters on regular characters at the same time.
-            let logical_key = if let Key::Character(ch) = key.logical_key.as_ref() {
-                // Match `Alt` bindings without `Alt` being applied, otherwise they use the
-                // composed chars, which are not intuitive to bind.
-                //
-                // On Windows, the `Ctrl + Alt` mangles `logical_key` to unidentified values, thus
-                // preventing them from being used in bindings
-                //
-                // For more see https://github.com/rust-windowing/winit/issues/2945.
-                if (cfg!(target_os = "macos") || (cfg!(windows) && mods.control_key()))
-                    && mods.alt_key()
-                {
-                    key.key_without_modifiers()
-                } else {
-                    Key::Character(ch.to_lowercase().into())
-                }
-            } else {
-                key.logical_key.clone()
-            };
-
-            let key = match (&binding.trigger, logical_key) {
+            let key = match (&binding.trigger, &logical_key) {
                 (BindingKey::Scancode(_), _) => BindingKey::Scancode(key.physical_key),
-                (_, code) => BindingKey::Keycode { key: code, location: key.location.into() },
+                (_, code) => {
+                    BindingKey::Keycode { key: code.clone(), location: key.location.into() }
+                },
             };
 
             if binding.is_triggered_by(mode, mods, &key) {
@@ -273,11 +275,19 @@ fn build_sequence(key: KeyEvent, mods: ModifiersState, mode: TermMode) -> Vec<u8
     let context =
         SequenceBuilder { mode, modifiers, kitty_seq, kitty_encode_all, kitty_event_type };
 
+    let associated_text = key.text_with_all_modifiers().filter(|text| {
+        mode.contains(TermMode::REPORT_ASSOCIATED_TEXT)
+            && key.state != ElementState::Released
+            && !text.is_empty()
+            && !is_control_character(text)
+    });
+
     let sequence_base = context
         .try_build_numpad(&key)
-        .or_else(|| context.try_build_named(&key))
+        .or_else(|| context.try_build_named_kitty(&key))
+        .or_else(|| context.try_build_named_normal(&key))
         .or_else(|| context.try_build_control_char_or_mod(&key, &mut modifiers))
-        .or_else(|| context.try_build_textual(&key));
+        .or_else(|| context.try_build_textual(&key, associated_text));
 
     let (payload, terminator) = match sequence_base {
         Some(SequenceBase { payload, terminator }) => (payload, terminator),
@@ -287,10 +297,7 @@ fn build_sequence(key: KeyEvent, mods: ModifiersState, mode: TermMode) -> Vec<u8
     let mut payload = format!("\x1b[{}", payload);
 
     // Add modifiers information.
-    if kitty_event_type
-        || !modifiers.is_empty()
-        || (mode.contains(TermMode::REPORT_ASSOCIATED_TEXT) && key.text.is_some())
-    {
+    if kitty_event_type || !modifiers.is_empty() || associated_text.is_some() {
         payload.push_str(&format!(";{}", modifiers.encode_esc_sequence()));
     }
 
@@ -305,19 +312,13 @@ fn build_sequence(key: KeyEvent, mods: ModifiersState, mode: TermMode) -> Vec<u8
         payload.push(event_type);
     }
 
-    // Associated text is not reported when the control/alt/logo is pressesed.
-    if mode.contains(TermMode::REPORT_ASSOCIATED_TEXT)
-        && key.state != ElementState::Released
-        && (modifiers.is_empty() || modifiers == SequenceModifiers::SHIFT)
-    {
-        if let Some(text) = key.text {
-            let mut codepoints = text.chars().map(u32::from);
-            if let Some(codepoint) = codepoints.next() {
-                payload.push_str(&format!(";{codepoint}"));
-            }
-            for codepoint in codepoints {
-                payload.push_str(&format!(":{codepoint}"));
-            }
+    if let Some(text) = associated_text {
+        let mut codepoints = text.chars().map(u32::from);
+        if let Some(codepoint) = codepoints.next() {
+            payload.push_str(&format!(";{codepoint}"));
+        }
+        for codepoint in codepoints {
+            payload.push_str(&format!(":{codepoint}"));
         }
     }
 
@@ -340,9 +341,13 @@ pub struct SequenceBuilder {
 
 impl SequenceBuilder {
     /// Try building sequence from the event's emitting text.
-    fn try_build_textual(&self, key: &KeyEvent) -> Option<SequenceBase> {
+    fn try_build_textual(
+        &self,
+        key: &KeyEvent,
+        associated_text: Option<&str>,
+    ) -> Option<SequenceBase> {
         let character = match key.logical_key.as_ref() {
-            Key::Character(character) => character,
+            Key::Character(character) if self.kitty_seq => character,
             _ => return None,
         };
 
@@ -372,10 +377,7 @@ impl SequenceBuilder {
             };
 
             Some(SequenceBase::new(payload.into(), SequenceTerminator::Kitty))
-        } else if self.kitty_encode_all
-            && self.mode.contains(TermMode::REPORT_ASSOCIATED_TEXT)
-            && key.text.is_some()
-        {
+        } else if self.kitty_encode_all && associated_text.is_some() {
             // Fallback when need to report text, but we don't have any key associated with this
             // text.
             Some(SequenceBase::new("0".into(), SequenceTerminator::Kitty))
@@ -429,45 +431,17 @@ impl SequenceBuilder {
         Some(SequenceBase::new(base.into(), SequenceTerminator::Kitty))
     }
 
-    /// Try building from [`NamedKey`].
-    fn try_build_named(&self, key: &KeyEvent) -> Option<SequenceBase> {
+    /// Try building from [`NamedKey`] using the kitty keyboard protocol encoding
+    /// for functional keys.
+    fn try_build_named_kitty(&self, key: &KeyEvent) -> Option<SequenceBase> {
         let named = match key.logical_key {
-            Key::Named(named) => named,
+            Key::Named(named) if self.kitty_seq => named,
             _ => return None,
         };
 
-        // The default parameter is 1, so we can omit it.
-        let one_based = if self.modifiers.is_empty() && !self.kitty_event_type { "" } else { "1" };
         let (base, terminator) = match named {
-            NamedKey::PageUp => ("5", SequenceTerminator::Normal('~')),
-            NamedKey::PageDown => ("6", SequenceTerminator::Normal('~')),
-            NamedKey::Insert => ("2", SequenceTerminator::Normal('~')),
-            NamedKey::Delete => ("3", SequenceTerminator::Normal('~')),
-            NamedKey::Home => (one_based, SequenceTerminator::Normal('H')),
-            NamedKey::End => (one_based, SequenceTerminator::Normal('F')),
-            NamedKey::ArrowLeft => (one_based, SequenceTerminator::Normal('D')),
-            NamedKey::ArrowRight => (one_based, SequenceTerminator::Normal('C')),
-            NamedKey::ArrowUp => (one_based, SequenceTerminator::Normal('A')),
-            NamedKey::ArrowDown => (one_based, SequenceTerminator::Normal('B')),
-            NamedKey::F1 => (one_based, SequenceTerminator::Normal('P')),
-            NamedKey::F2 => (one_based, SequenceTerminator::Normal('Q')),
-            NamedKey::F3 => {
-                // F3 in kitty protocol diverges from alacritty's terminfo.
-                if self.kitty_seq {
-                    ("13", SequenceTerminator::Normal('~'))
-                } else {
-                    (one_based, SequenceTerminator::Normal('R'))
-                }
-            },
-            NamedKey::F4 => (one_based, SequenceTerminator::Normal('S')),
-            NamedKey::F5 => ("15", SequenceTerminator::Normal('~')),
-            NamedKey::F6 => ("17", SequenceTerminator::Normal('~')),
-            NamedKey::F7 => ("18", SequenceTerminator::Normal('~')),
-            NamedKey::F8 => ("19", SequenceTerminator::Normal('~')),
-            NamedKey::F9 => ("20", SequenceTerminator::Normal('~')),
-            NamedKey::F10 => ("21", SequenceTerminator::Normal('~')),
-            NamedKey::F11 => ("23", SequenceTerminator::Normal('~')),
-            NamedKey::F12 => ("24", SequenceTerminator::Normal('~')),
+            // F3 in kitty protocol diverges from alacritty's terminfo.
+            NamedKey::F3 => ("13", SequenceTerminator::Normal('~')),
             NamedKey::F13 => ("57376", SequenceTerminator::Kitty),
             NamedKey::F14 => ("57377", SequenceTerminator::Kitty),
             NamedKey::F15 => ("57378", SequenceTerminator::Kitty),
@@ -507,6 +481,52 @@ impl SequenceBuilder {
             NamedKey::AudioVolumeDown => ("57438", SequenceTerminator::Kitty),
             NamedKey::AudioVolumeUp => ("57439", SequenceTerminator::Kitty),
             NamedKey::AudioVolumeMute => ("57440", SequenceTerminator::Kitty),
+            _ => return None,
+        };
+
+        Some(SequenceBase::new(base.into(), terminator))
+    }
+
+    /// Try building from [`NamedKey`].
+    fn try_build_named_normal(&self, key: &KeyEvent) -> Option<SequenceBase> {
+        let named = match key.logical_key {
+            Key::Named(named) => named,
+            _ => return None,
+        };
+
+        // The default parameter is 1, so we can omit it.
+        let one_based = if self.modifiers.is_empty() && !self.kitty_event_type { "" } else { "1" };
+        let (base, terminator) = match named {
+            NamedKey::PageUp => ("5", SequenceTerminator::Normal('~')),
+            NamedKey::PageDown => ("6", SequenceTerminator::Normal('~')),
+            NamedKey::Insert => ("2", SequenceTerminator::Normal('~')),
+            NamedKey::Delete => ("3", SequenceTerminator::Normal('~')),
+            NamedKey::Home => (one_based, SequenceTerminator::Normal('H')),
+            NamedKey::End => (one_based, SequenceTerminator::Normal('F')),
+            NamedKey::ArrowLeft => (one_based, SequenceTerminator::Normal('D')),
+            NamedKey::ArrowRight => (one_based, SequenceTerminator::Normal('C')),
+            NamedKey::ArrowUp => (one_based, SequenceTerminator::Normal('A')),
+            NamedKey::ArrowDown => (one_based, SequenceTerminator::Normal('B')),
+            NamedKey::F1 => (one_based, SequenceTerminator::Normal('P')),
+            NamedKey::F2 => (one_based, SequenceTerminator::Normal('Q')),
+            NamedKey::F3 => (one_based, SequenceTerminator::Normal('R')),
+            NamedKey::F4 => (one_based, SequenceTerminator::Normal('S')),
+            NamedKey::F5 => ("15", SequenceTerminator::Normal('~')),
+            NamedKey::F6 => ("17", SequenceTerminator::Normal('~')),
+            NamedKey::F7 => ("18", SequenceTerminator::Normal('~')),
+            NamedKey::F8 => ("19", SequenceTerminator::Normal('~')),
+            NamedKey::F9 => ("20", SequenceTerminator::Normal('~')),
+            NamedKey::F10 => ("21", SequenceTerminator::Normal('~')),
+            NamedKey::F11 => ("23", SequenceTerminator::Normal('~')),
+            NamedKey::F12 => ("24", SequenceTerminator::Normal('~')),
+            NamedKey::F13 => ("25", SequenceTerminator::Normal('~')),
+            NamedKey::F14 => ("26", SequenceTerminator::Normal('~')),
+            NamedKey::F15 => ("28", SequenceTerminator::Normal('~')),
+            NamedKey::F16 => ("29", SequenceTerminator::Normal('~')),
+            NamedKey::F17 => ("31", SequenceTerminator::Normal('~')),
+            NamedKey::F18 => ("32", SequenceTerminator::Normal('~')),
+            NamedKey::F19 => ("33", SequenceTerminator::Normal('~')),
+            NamedKey::F20 => ("34", SequenceTerminator::Normal('~')),
             _ => return None,
         };
 
@@ -595,7 +615,7 @@ impl SequenceBase {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SequenceTerminator {
     /// The normal key esc sequence terminator defined by xterm/dec.
     Normal(char),
@@ -641,4 +661,12 @@ impl From<ModifiersState> for SequenceModifiers {
         modifiers.set(Self::SUPER, mods.super_key());
         modifiers
     }
+}
+
+/// Check whether the `text` is `0x7f`, `C0` or `C1` control code.
+fn is_control_character(text: &str) -> bool {
+    // 0x7f (DEL) is included here since it has a dedicated control code (`^?`) which generally
+    // does not match the reported text (`^H`), despite not technically being part of C0 or C1.
+    let codepoint = text.bytes().next().unwrap();
+    text.len() == 1 && (codepoint < 0x20 || (0x7f..=0x9f).contains(&codepoint))
 }

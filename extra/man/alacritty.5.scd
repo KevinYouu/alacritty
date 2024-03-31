@@ -86,7 +86,7 @@ This section documents the *[window]* table of the configuration file.
 	least _2_, while using a value of _0_ for columns and lines will fall back
 	to the window manager's recommended size
 
-	Default: { column = _0_, lines = _0_ }
+	Default: { columns = _0_, lines = _0_ }
 
 *position* = _"None"_ | { x = _<integer>_, y = _<integer>_ }
 
@@ -272,8 +272,8 @@ macOS:     { family = _"Menlo"_,     style = _"Regular"_ }
 *builtin_box_drawing* = _true_ | _false_
 
 	When _true_, Alacritty will use a custom built-in font for box drawing
-	characters (Unicode points _U+2500_ - _U+259F_) and powerline symbols
-	(Unicode points _U+E0B0_ - _U+E0B3_).
+	characters (Unicode points _U+2500_ - _U+259F_), legacy computing symbols
+	(_U+1FB00_ - _U+1FB3B_), and powerline symbols (_U+E0B0_ - _U+E0B3_).
 
 	Default: _true_
 
@@ -609,10 +609,10 @@ This section documents the *[mouse]* table of the configuration file.
 
 	Default: _false_
 
-*bindings* = [{ *<mouse>*, *<mods>*, *<mode>*, *<action>* | *<chars>* },]
+*bindings* = [{ *<mouse>*, *<mods>*, *<mode>*, *<command>* | *<chars>* | *<action>* },]
 
-	See _keyboard.bindings_ for full documentation on _mods_, _mode_, _action_,
-	and _chars_.
+	See _keyboard.bindings_ for full documentation on _mods_, _mode_, _command_,
+	_chars_, and _action_.
 
 	When an application running within Alacritty captures the mouse, the `Shift`
 	modifier can be used to suppress mouse reporting. If no action is found for
@@ -721,7 +721,7 @@ regex = _"(ipfs:|ipns:|magnet:|mailto:|gemini://|gopher://|https://|http://|news
 
 This section documents the *[keyboard]* table of the configuration file.
 
-*bindings* = [{ *<key>*, *<mods>*, *<mode>*, *<action>* | *<chars>* },]
+*bindings* = [{ *<key>*, *<mods>*, *<mode>*, *<command>* | *<chars>* | *<action>* },]
 
 	To unset a default binding, you can use the action _"ReceiveChar"_ to remove
 	it or _"None"_ to inhibit any action.
@@ -739,8 +739,8 @@ This section documents the *[keyboard]* table of the configuration file.
 _https://docs.rs/winit/latest/winit/keyboard/enum.Key.html#variant.Dead_
 
 		Numpad keys are prefixed by _Numpad_: _"NumpadEnter"_ | _"NumpadAdd"_ |
-		_"NumpadComma"_ | _"NumpadDivide"_ | _"NumpadEquals"_ | _"NumpadSubtract"_ |
-		_"NumpadMultiply"_ | _"Numpad[0-9]"_.
+		_"NumpadComma"_ | _"NumpadDecimal"_ | _"NumpadDivide"_ | _"NumpadEquals"_ |
+		_"NumpadSubtract"_ | _"NumpadMultiply"_ | _"Numpad[0-9]"_.
 
 		The _key_ field also supports using scancodes, which are specified as a
 		decimal number.
@@ -759,6 +759,10 @@ _https://docs.rs/winit/latest/winit/keyboard/enum.Key.html#variant.Dead_
 		the binding to take effect.
 
 		Multiple modes can be combined using _|_, like this: _"~Vi|Search"_.
+
+	*command* = _"<string>"_ | { program = _"<string>"_, args = [_"<string>"_,] }
+
+		Fork and execute the specified command.
 
 	*chars* = _"<string>"_
 
@@ -886,7 +890,7 @@ _https://docs.rs/winit/latest/winit/keyboard/enum.Key.html#variant.Dead_
 			Centers the screen around the vi mode cursor.
 		*InlineSearchForward*
 			Search forward within the current line.
-		*InlineSearchBcakward*
+		*InlineSearchBackward*
 			Search backward within the current line.
 		*InlineSearchForwardShort*
 			Search forward within the current line, stopping just short of the character.
@@ -996,7 +1000,7 @@ relied upon.
 	Example:
 		_ALACRITTY_EXTRA_LOG_TARGETS="winit;vte" alacritty -vvv_
 
-*renderer* = _"glsl3"_ | _"gles2"_ | _"gles2_pure"_ | _"None"_
+*renderer* = _"glsl3"_ | _"gles2"_ | _"gles2pure"_ | _"None"_
 
 	Force use of a specific renderer, _"None"_ will use the highest available
 	one.

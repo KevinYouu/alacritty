@@ -7,6 +7,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## 0.14.0-dev
 
+### Changed
+
+- Pressing `Alt` with unicode input will now add `ESC` like for ASCII input
+
+## 0.13.2
+
+### Added
+
+- Default `Home`/`End` bindings in Vi mode mapped to `First`/`Last` respectively
+
+### Fixed
+
+- CLI env variables clearing configuration file variables
+- Vi inline search/semantic selection expanding across newlines
+- C0 and C1 codes being emitted in associated text when using kitty keyboard
+- Occasional hang on startup with some Wayland compositors
+- Missing key for `NumpadDecimal` in key bindings
+- Scrolling content upwards moving lines into history when it shouldn't
+- Sticky keys not working sometimes on X11
+- Modifiers occasionally getting desynced on X11
+- Autokey no longer working with alacritty on X11
+- Freeze when moving window between monitors on Xfwm
+- Mouse cursor not changing on Wayland when cursor theme uses legacy cursor icon names
+- Config keys are available under proper names
+- Build failure when compiling with x11 feature on NetBSD
+- Hint `Select` action selecting the entire line for URL escapes
+- Kitty encoding used for regular keys when they don't carry text
+
+### Changed
+
+- No unused-key warnings will be emitted for OS-specific config keys
+- Use built-in font for sextant symbols from `U+1FB00` to `U+1FB3B`
+- Kitty encoding is not used anymore for uncommon keys unless the protocol enabled
+
 ## 0.13.1
 
 ### Added
@@ -457,7 +491,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Performance of scrolling regions with offset from the bottom
 - Extra mouse buttons are no longer ignored on Wayland
 - Numpad arrow keys are now properly recognized on Wayland
-- Compilation when targetting aarch64-apple-darwin
+- Compilation when targeting aarch64-apple-darwin
 - Window not being completely opaque on Windows
 - Window being always on top during alt-tab on Windows
 - Cursor position not reported to apps when mouse is moved with button held outside of window

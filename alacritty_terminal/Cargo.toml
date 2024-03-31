@@ -1,11 +1,12 @@
 [package]
 name = "alacritty_terminal"
-version = "0.20.1-dev"
+version = "0.22.1-dev"
 authors = ["Christian Duerr <contact@christianduerr.com>", "Joe Wilm <joe@jwilm.com>"]
 license = "Apache-2.0"
 description = "Library for writing terminal emulators"
 readme = "../README.md"
-homepage = "https://github.com/alacritty/alacritty"
+homepage = "https://alacritty.org"
+repository = "https://github.com/alacritty/alacritty"
 edition = "2021"
 rust-version = "1.70.0"
 
@@ -14,7 +15,7 @@ default = ["serde"]
 serde = ["dep:serde", "bitflags/serde", "vte/serde"]
 
 [dependencies]
-base64 = "0.21.3"
+base64 = "0.22.0"
 bitflags = "2.4.1"
 home = "0.5.5"
 libc = "0.2"

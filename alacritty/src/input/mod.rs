@@ -19,6 +19,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{
     ElementState, Modifiers, MouseButton, MouseScrollDelta, Touch as TouchEvent, TouchPhase,
 };
+#[cfg(target_os = "macos")]
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::ModifiersState;
 #[cfg(target_os = "macos")]
@@ -103,6 +104,7 @@ pub trait ActionContext<T: EventListener> {
     fn pop_message(&mut self) {}
     fn message(&self) -> Option<&Message>;
     fn config(&self) -> &UiConfig;
+    #[cfg(target_os = "macos")]
     fn event_loop(&self) -> &EventLoopWindowTarget<Event>;
     fn mouse_mode(&self) -> bool;
     fn clipboard_mut(&mut self) -> &mut Clipboard;
@@ -410,7 +412,7 @@ impl<T: EventListener> Execute<T> for Action {
             Action::SelectTab9 => ctx.window().select_tab_at_index(8),
             #[cfg(target_os = "macos")]
             Action::SelectLastTab => ctx.window().select_last_tab(),
-            Action::ReceiveChar | Action::None => (),
+            _ => (),
         }
     }
 }
@@ -1216,6 +1218,7 @@ mod tests {
             self.clipboard
         }
 
+        #[cfg(target_os = "macos")]
         fn event_loop(&self) -> &EventLoopWindowTarget<Event> {
             unimplemented!();
         }

@@ -1305,7 +1305,7 @@ impl<T: EventListener> Handler for Term<T> {
             return;
         }
 
-        trace!("Attemting to pop {to_pop} keyboard modes from the stack");
+        trace!("Attempting to pop {to_pop} keyboard modes from the stack");
         let new_len = self.keyboard_mode_stack.len().saturating_sub(to_pop as usize);
         self.keyboard_mode_stack.truncate(new_len);
 
@@ -2389,10 +2389,8 @@ pub mod test {
 
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
-    use unicode_width::UnicodeWidthChar;
 
     use crate::event::VoidListener;
-    use crate::index::Column;
 
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct TermSize {

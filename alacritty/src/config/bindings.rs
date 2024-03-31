@@ -120,7 +120,6 @@ pub enum Action {
     /// Store current selection into clipboard.
     Copy,
 
-    #[cfg(not(any(target_os = "macos", windows)))]
     /// Store current selection into selection buffer.
     CopySelection,
 
@@ -167,7 +166,6 @@ pub enum Action {
     Hide,
 
     /// Hide all windows other than Alacritty on macOS.
-    #[cfg(target_os = "macos")]
     HideOtherApplications,
 
     /// Minimize the Alacritty window.
@@ -182,58 +180,45 @@ pub enum Action {
     /// Spawn a new instance of Alacritty.
     SpawnNewInstance,
 
-    #[cfg(target_os = "macos")]
     /// Select next tab.
     SelectNextTab,
 
-    #[cfg(target_os = "macos")]
     /// Select previous tab.
     SelectPreviousTab,
 
-    #[cfg(target_os = "macos")]
     /// Select the first tab.
     SelectTab1,
 
-    #[cfg(target_os = "macos")]
     /// Select the second tab.
     SelectTab2,
 
-    #[cfg(target_os = "macos")]
     /// Select the third tab.
     SelectTab3,
 
-    #[cfg(target_os = "macos")]
     /// Select the fourth tab.
     SelectTab4,
 
-    #[cfg(target_os = "macos")]
     /// Select the fifth tab.
     SelectTab5,
 
-    #[cfg(target_os = "macos")]
     /// Select the sixth tab.
     SelectTab6,
 
-    #[cfg(target_os = "macos")]
     /// Select the seventh tab.
     SelectTab7,
 
-    #[cfg(target_os = "macos")]
     /// Select the eighth tab.
     SelectTab8,
 
-    #[cfg(target_os = "macos")]
     /// Select the ninth tab.
     SelectTab9,
 
-    #[cfg(target_os = "macos")]
     /// Select the last tab.
     SelectLastTab,
 
     /// Create a new Alacritty window.
     CreateNewWindow,
 
-    #[cfg(target_os = "macos")]
     /// Create new window in a tab.
     CreateNewTab,
 
@@ -244,7 +229,6 @@ pub enum Action {
     ToggleMaximized,
 
     /// Toggle simple fullscreen on macOS.
-    #[cfg(target_os = "macos")]
     ToggleSimpleFullscreen,
 
     /// Clear active selection.
@@ -469,6 +453,7 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         Backspace, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x7f".into());
         Backspace, ModifiersState::ALT,     ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x1b\x7f".into());
         Backspace, ModifiersState::SHIFT,   ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x7f".into());
+        Enter => KeyLocation::Numpad, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\n".into());
         // Vi mode.
         Space, ModifiersState::SHIFT | ModifiersState::CONTROL, ~BindingMode::SEARCH; Action::ToggleViMode;
         Space, ModifiersState::SHIFT | ModifiersState::CONTROL, +BindingMode::VI, ~BindingMode::SEARCH; Action::ScrollToBottom;
@@ -512,6 +497,8 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         ArrowRight,                         +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Right;
         "0",                                +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::First;
         "$",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Last;
+        Home,                               +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::First;
+        End,                                +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Last;
         "^",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::FirstOccupied;
         "h",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::High;
         "m",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Middle;
@@ -719,6 +706,7 @@ impl<'a> Deserialize<'a> for BindingKey {
                         "NumpadEnter" => (Key::Named(NamedKey::Enter), KeyLocation::Numpad),
                         "NumpadAdd" => (Key::Character("+".into()), KeyLocation::Numpad),
                         "NumpadComma" => (Key::Character(",".into()), KeyLocation::Numpad),
+                        "NumpadDecimal" => (Key::Character(".".into()), KeyLocation::Numpad),
                         "NumpadDivide" => (Key::Character("/".into()), KeyLocation::Numpad),
                         "NumpadEquals" => (Key::Character("=".into()), KeyLocation::Numpad),
                         "NumpadSubtract" => (Key::Character("-".into()), KeyLocation::Numpad),
