@@ -1,4 +1,6 @@
-![](extra/logo/compat/alacritty-macos.png)
+<p align="center">
+    <img width="200" alt="Alacritty Logo" src="https://raw.githubusercontent.com/KevinYouu/alacritty/master/extra/logo/compat/alacritty-macos.png">
+</p>
 
 > This repository only modifies the macOS icon
 
