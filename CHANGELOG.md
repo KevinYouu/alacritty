@@ -5,11 +5,21 @@ The sections should follow the order `Packaging`, `Added`, `Changed`, `Fixed` an
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+Notable changes to the `alacritty_terminal` crate are documented in its
+[CHANGELOG](./alacritty_terminal/CHANGELOG.md).
+
 ## 0.14.0-dev
 
 ### Changed
 
 - Pressing `Alt` with unicode input will now add `ESC` like for ASCII input
+
+### Fixed
+
+- Crash when trying to create a new tab without decorations enabled
+- New window being treated as focused when it's not on Wayland
+- IME preview blending into text below it
+- Dynamic title disabled for new windows when initial one has title as CLI option
 
 ## 0.13.2
 
