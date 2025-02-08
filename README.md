@@ -8,7 +8,7 @@
 
 <p align="center">
   <img alt="Alacritty - A fast, cross-platform, OpenGL terminal emulator"
-       src="extra/promo/alacritty-readme.png">
+       src="https://raw.githubusercontent.com/alacritty/alacritty/master/extra/promo/alacritty-readme.png">
 </p>
 
 ## About
@@ -71,11 +71,9 @@ following locations:
 3. `$HOME/.config/alacritty/alacritty.toml`
 4. `$HOME/.alacritty.toml`
 
-### Windows
+On Windows, the config file will be looked for in:
 
-On Windows, the config file should be located at:
-
-`%APPDATA%\alacritty\alacritty.toml`
+* `%APPDATA%\alacritty\alacritty.toml`
 
 ## Contributing
 

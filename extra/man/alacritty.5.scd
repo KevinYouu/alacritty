@@ -9,9 +9,23 @@ Alacritty - TOML configuration file format.
 Alacritty's configuration file uses the TOML format. The format's specification
 can be found at _https://toml.io/en/v1.0.0_.
 
+# LOCATION
+
+Alacritty doesn't create the config file for you, but it looks for one in the
+following locations on UNIX systems:
+
+. _$XDG_CONFIG_HOME/alacritty/alacritty.toml_
+. _$XDG_CONFIG_HOME/alacritty.toml_
+. _$HOME/.config/alacritty/alacritty.toml_
+. _$HOME/.alacritty.toml_
+
+On Windows, the config file will be looked for in:
+
+. _%APPDATA%\\alacritty\\alacritty.toml_
+
 # GENERAL
 
-This section documents the root level of the configuration file.
+This section documents the *[general]* table of the configuration file.
 
 *import* = [_"<string>"_,]
 
@@ -21,28 +35,16 @@ This section documents the root level of the configuration file.
 	file being loaded last. If a field is already present in a previous import,
 	it will be replaced.
 
-	All imports must either be absolute paths starting with _/_, or paths
-	relative to the user's home directory starting with _~/_.
+	All imports must either be absolute paths starting with _/_, paths relative
+	to the user's home directory starting with _~/_, or paths relative from the
+	current config file.
 
 	Example:
 		import = [++
 	_"~/.config/alacritty/base16-dark.toml"_,++
 	_"~/.config/alacritty/keybindings.toml"_,++
+	_"alacritty-theme/themes/gruvbox_dark.toml"_,++
 ]
-
-*shell* = _"<string>"_ | { program = _"<string>"_, args = [_"<string>"_,] }
-
-	You can set _shell.program_ to the path of your favorite shell, e.g.
-	_/bin/zsh_. Entries in _shell.args_ are passed as arguments to the shell.
-
-	Default:
-		Linux/BSD/macOS: _$SHELL_ or the user's login shell, if _$SHELL_ is unset++
-Windows: _"powershell"_
-
-	Example:
-		*[shell]*++
-program = _"/bin/zsh"_++
-args = [_"-l"_]
 
 *working_directory* = _"<string>"_ | _"None"_
 
@@ -88,7 +90,7 @@ This section documents the *[window]* table of the configuration file.
 
 	Default: { columns = _0_, lines = _0_ }
 
-*position* = _"None"_ | { x = _<integer>_, y = _<integer>_ }
+*position* = _"None"_ | { x = _<integer>_, y = _<integer>_ } # _(has no effect on Wayland)_
 
 	Window startup position.
 
@@ -181,17 +183,28 @@ This section documents the *[window]* table of the configuration file.
 
 	Default: _"None"_
 
-*resize_increments* = _true_ | _false_
+*resize_increments* = _true_ | _false_ # _(works on macOS/X11)_
 
 	Prefer resizing window by discrete steps equal to cell dimensions.
 
 	Default: _false_
 
-*option_as_alt* = _"OnlyLeft"_ | _"OnlyRight"_ | _"Both"_ | _"None"_ # _(macos only)_
+*option_as_alt* = _"OnlyLeft"_ | _"OnlyRight"_ | _"Both"_ | _"None"_ # _(macOS only)_
 
 	Make _Option_ key behave as _Alt_.
 
 	Default: _"None"_
+
+*level* = _"Normal"_ | _"AlwaysOnTop"_
+
+	Sets window level.
+
+	*Normal*
+		Window adheres to system's default z-order.
+	*AlwaysOnTop*
+		Window is a toplevel window.
+
+	Default: _"Normal"_
 
 Example:
 	*[window]*++
@@ -589,6 +602,18 @@ This section documents the *[cursor]* table of the configuration file.
 
 This section documents the *[terminal]* table of the configuration file.
 
+*shell* = _"<string>"_ | { program = _"<string>"_, args = [_"<string>"_,] }
+
+	You can set _shell.program_ to the path of your favorite shell, e.g.
+	_/bin/zsh_. Entries in _shell.args_ are passed as arguments to the shell.
+
+	Default:
+		Linux/BSD/macOS: _$SHELL_ or the user's login shell, if _$SHELL_ is unset++
+Windows: _"powershell"_
+
+	Example:
+		*shell* = { program = _"/bin/zsh"_, args = [_"-l"_] }
+
 *osc52* = _"Disabled"_ | _"OnlyCopy"_ | _"OnlyPaste"_ | _"CopyPaste"_
 
 	Controls the ability to write to the system clipboard with the _OSC 52_
@@ -647,7 +672,7 @@ terminal and pipe it to other applications.
 
 	Default: _"jfkdls;ahgurieowpq"_
 
-*enabled* = [{ *<regex>*, *<hyperlinks>*, *<post_processing>*, *<persist>*, *<action>*, *<command>* *<binding>*, *<mouse>* },]
+*enabled* = [{ *<regex>*, *<hyperlinks>*, *<post_processing>*, *<persist>*, *<action>*, *<command>*, *<binding>*, *<mouse>* },]
 
 Array with all available hints.
 
@@ -714,8 +739,9 @@ hyperlinks      = _true_++
 post_processing = _true_++
 persist         = _false_++
 mouse.enabled   = _true_++
-binding         = { key = _"U"_, mods = _"Control|Shift"_ }++
-regex = _"(ipfs:|ipns:|magnet:|mailto:|gemini://|gopher://|https://|http://|news:|file:|git://|ssh:|ftp://)[^\\u0000-\\u001F\\u007F-\\u009F<>\\"\\\\s{-}\\\\^⟨⟩`]+"_
+binding         = { key = _"O"_, mods = _"Control|Shift"_ }++
+regex =
+_"(ipfs:|ipns:|magnet:|mailto:|gemini://|gopher://|https://|http://|news:|file:|git://|ssh:|ftp://)[^\\u0000-\\u001F\\u007F-\\u009F<>\\"\\\\s{-}\\\\^⟨⟩`\\\\\\\\]+"_
 
 # KEYBOARD
 
